@@ -1,5 +1,6 @@
 from pocketoptionapi.stable_api
-import PocketOptionimport asyncio
+import PocketOption
+import asyncio
 import requests
 import time
 import json
