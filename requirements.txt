@@ -1,3 +1,8 @@
 requests==2.31.0
-pocketoptionapi2==0.1.1
-websocket-client==1.6.1
+websocket-client>=1.6.1
+python-dateutil>=2.8.2
+tzlocal>=5.1
+websockets>=15.0
+pandas>=2.0.3
+colorama>=0.4.6
+pywebview>=6.2.1
