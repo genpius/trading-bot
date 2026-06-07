@@ -10,7 +10,7 @@ CHAT_ID = "7120687986"
 
 # ===== POCKET OPTION CONFIGURATION =====
 # 🔻🔻🔻 REPLACE THIS WITH YOUR ACTUAL SSID 🔻🔻🔻
-SSID = '42["auth",{"session":"%22%3Bs%3A32%3A%2233d40ea25c78bd300588c27d7a9a9e59%22%3Bs%3A10%3A%22","isDemo":1,"uid":"5c6a849a-1c1f-4b15-bfa7-ee3eb4052368","platform":2}]'
+SSID = '42["auth",{"session":"a%3A2%3A%7Bs%3A6%3A%22key_id%22%3Bs%3A16%3A%220a25c12706a1a102%22%3Bs%3A7%3A%22user_id%22%3Bs%3A9%3A%22134215227%22%3B%7D","isDemo":1,"uid":"5c6a849a-1c1f-4b15-bfa7-ee3eb4052368","platform":2}]'
 # 🔺🔺🔺 REPLACE THIS WITH YOUR ACTUAL SSID 🔺🔺🔺
 
 IS_DEMO = True
