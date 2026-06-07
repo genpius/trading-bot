@@ -9,8 +9,13 @@ BOT_TOKEN = "8628176399:AAHC50NsptqAEXQ-sWZ9Yx8KCVzwmJL0lzg"
 CHAT_ID = "7120687986"
 
 # ===== POCKET OPTION CONFIGURATION =====
-# REPLACE THIS WITH YOUR ACTUAL SSID FROM COOKIE-EDITOR
-SSID = '42["auth",{"session":"a%3A4%3A%7Bs%3A10%3A%22session_id%22%3Bs%3A32%3A%2233d40ea25c78bd300588c27d7a9a9e59%22%3Bs%3A10%3A%22ip_address%22%3Bs%3A14%3A%22141.95.102.117%22%3Bs%3A10%3A%22user_agent%22%3Bs%3A70%3A%22Mozilla%2F5.0%20%28X11%3B%20Linux%20x86_64%3B%20rv%3A151.0%29%20Gecko%2F20100101%20Firefox%2F151.0%22%3Bs%3A13%3A%22last_activity%22%3Bi%3A1780746618%3B%7Dcead7ca48d4a3b866944378eb3a8e05b","isDemo":1,"uid":"5c6a849a-1c1f-4b15-bfa7-ee3eb4052368","platform":2}]'
+# REPLACE THESE WITH YOUR FRESH SSID VALUES FROM COOKIE-EDITOR
+CI_SESSION = "a%3A4%3A%7Bs%3A10%3A%22session_id%22%3Bs%3A32%3A%2233d40ea25c78bd300588c27d7a9a9e59%22%3Bs%3A10%3A%22ip_address%22%3Bs%3A14%3A%22141.95.102.117%22%3Bs%3A10%3A%22user_agent%22%3Bs%3A70%3A%22Mozilla%2F5.0%20%28X11%3B%20Linux%20x86_64%3B%20rv%3A151.0%29%20Gecko%2F20100101%20Firefox%2F151.0%22%3Bs%3A13%3A%22last_activity%22%3Bi%3A1780746618%3B%7Dcead7ca48d4a3b866944378eb3a8e05b"
+PO_UUID = "5c6a849a-1c1f-4b15-bfa7-ee3eb4052368"
+# =======================================
+
+# Build the SSID in the correct format
+SSID = f'42["auth",{{"session":"{CI_SESSION}","isDemo":1,"uid":"{PO_UUID}","platform":2}}]'
 IS_DEMO = True
 
 # ===== TRADING SETTINGS =====
@@ -27,6 +32,7 @@ last_trade_time = {}
 trade_count = 0
 
 def send_telegram(message):
+    """Send message to Telegram"""
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         payload = {"chat_id": CHAT_ID, "text": message}
@@ -36,6 +42,7 @@ def send_telegram(message):
         print(f"Telegram error: {e}")
 
 def calculate_rsi(prices):
+    """Calculate RSI from price list"""
     if len(prices) < RSI_PERIOD + 1:
         return 50
     
@@ -62,6 +69,7 @@ def calculate_rsi(prices):
     return round(rsi, 2)
 
 def get_signal(asset):
+    """Get real trading signal from market data"""
     global api
     
     try:
@@ -69,6 +77,7 @@ def get_signal(asset):
         candles = api.get_candles(asset=asset, interval=60, size=50)
         
         if not candles or len(candles) < 30:
+            print(f"Not enough candles for {asset}: {len(candles) if candles else 0}")
             return None
         
         # Extract close prices
@@ -78,12 +87,15 @@ def get_signal(asset):
         
         # Calculate RSI
         rsi = calculate_rsi(close_prices)
+        current_price = close_prices[-1]
+        
+        print(f"{asset} - RSI: {rsi}, Price: {current_price}")
         
         # Determine signal
         if rsi <= RSI_OVERSOLD:
-            return {"direction": "CALL 🟢", "rsi": rsi, "price": close_prices[-1]}
+            return {"direction": "CALL 🟢", "rsi": rsi, "price": current_price}
         elif rsi >= RSI_OVERBOUGHT:
-            return {"direction": "PUT 🔴", "rsi": rsi, "price": close_prices[-1]}
+            return {"direction": "PUT 🔴", "rsi": rsi, "price": current_price}
         else:
             return None
             
@@ -92,6 +104,7 @@ def get_signal(asset):
         return None
 
 def place_trade(asset, direction, price, rsi):
+    """Place actual trade on Pocket Option"""
     global api, trade_count
     
     action = "call" if "CALL" in direction else "put"
@@ -119,6 +132,7 @@ TIME: {datetime.now().strftime("%H:%M:%S")}
             return True
         else:
             print(f"❌ Trade failed: {order_id}")
+            send_telegram(f"❌ Trade failed on {asset}: {order_id}")
             return False
             
     except Exception as e:
@@ -139,11 +153,22 @@ def main():
         print("Connection failed")
         return
     
-    balance = api.get_balance()
-    send_telegram(f"✅ Connected!\nDemo Balance: ${balance:.2f}")
-    print(f"Balance: ${balance:.2f}")
+    # Get balance with error handling
+    try:
+        balance = api.get_balance()
+        if balance is None or balance == 0:
+            send_telegram("⚠️ Connected but balance is $0. Check if your SSID is correct and account has funds.")
+            print(f"Balance returned: {balance}")
+        else:
+            send_telegram(f"✅ Connected!\nDemo Balance: ${balance:.2f}")
+            print(f"Balance: ${balance:.2f}")
+    except Exception as e:
+        send_telegram(f"❌ Balance error: {e}")
+        print(f"Balance error: {e}")
+        return
     
-    print("Bot running. Scanning for signals...")
+    print("Bot running. Scanning for signals every 60 seconds...")
+    send_telegram("🔍 Scanning OTC assets for RSI signals...")
     
     while True:
         try:
@@ -174,6 +199,7 @@ def main():
             
         except Exception as e:
             print(f"Main loop error: {e}")
+            send_telegram(f"⚠️ Bot error: {e}")
             time.sleep(10)
 
 if __name__ == "__main__":
