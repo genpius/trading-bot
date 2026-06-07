@@ -1,1 +1,180 @@
+import requests
+import time
+import threading
+from datetime import datetime
+from pocketoptionapi.stable_api import PocketOption
 
+# ===== TELEGRAM CONFIGURATION =====
+BOT_TOKEN = "8628176399:AAHC50NsptqAEXQ-sWZ9Yx8KCVzwmJL0lzg"
+CHAT_ID = "7120687986"
+
+# ===== POCKET OPTION CONFIGURATION =====
+# REPLACE THIS WITH YOUR ACTUAL SSID FROM COOKIE-EDITOR
+SSID = '42["auth",{"session":"a%3A4%3A%7Bs%3A10%3A%22session_id%22%3Bs%3A32%3A%2233d40ea25c78bd300588c27d7a9a9e59%22%3Bs%3A10%3A%22ip_address%22%3Bs%3A14%3A%22141.95.102.117%22%3Bs%3A10%3A%22user_agent%22%3Bs%3A70%3A%22Mozilla%2F5.0%20%28X11%3B%20Linux%20x86_64%3B%20rv%3A151.0%29%20Gecko%2F20100101%20Firefox%2F151.0%22%3Bs%3A13%3A%22last_activity%22%3Bi%3A1780746618%3B%7Dcead7ca48d4a3b866944378eb3a8e05b","isDemo":1,"uid":"5c6a849a-1c1f-4b15-bfa7-ee3eb4052368","platform":2}]'
+IS_DEMO = True
+
+# ===== TRADING SETTINGS =====
+ASSETS = ["EURUSD_otc", "GBPUSD_otc", "USDJPY_otc", "AUDUSD_otc"]
+AMOUNT = 1.0
+RSI_PERIOD = 14
+RSI_OVERBOUGHT = 70
+RSI_OVERSOLD = 30
+CHECK_INTERVAL = 60
+
+# ===== GLOBAL VARIABLES =====
+api = None
+last_trade_time = {}
+trade_count = 0
+
+def send_telegram(message):
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        payload = {"chat_id": CHAT_ID, "text": message}
+        requests.post(url, data=payload, timeout=10)
+        print("✅ Telegram sent")
+    except Exception as e:
+        print(f"Telegram error: {e}")
+
+def calculate_rsi(prices):
+    if len(prices) < RSI_PERIOD + 1:
+        return 50
+    
+    gains = []
+    losses = []
+    
+    for i in range(1, len(prices)):
+        change = prices[i] - prices[i-1]
+        if change > 0:
+            gains.append(change)
+            losses.append(0)
+        else:
+            gains.append(0)
+            losses.append(abs(change))
+    
+    avg_gain = sum(gains[-RSI_PERIOD:]) / RSI_PERIOD
+    avg_loss = sum(losses[-RSI_PERIOD:]) / RSI_PERIOD
+    
+    if avg_loss == 0:
+        return 100
+    
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return round(rsi, 2)
+
+def get_signal(asset):
+    global api
+    
+    try:
+        # Get real candles from Pocket Option
+        candles = api.get_candles(asset=asset, interval=60, size=50)
+        
+        if not candles or len(candles) < 30:
+            return None
+        
+        # Extract close prices
+        close_prices = []
+        for candle in candles:
+            close_prices.append(float(candle['close']))
+        
+        # Calculate RSI
+        rsi = calculate_rsi(close_prices)
+        
+        # Determine signal
+        if rsi <= RSI_OVERSOLD:
+            return {"direction": "CALL 🟢", "rsi": rsi, "price": close_prices[-1]}
+        elif rsi >= RSI_OVERBOUGHT:
+            return {"direction": "PUT 🔴", "rsi": rsi, "price": close_prices[-1]}
+        else:
+            return None
+            
+    except Exception as e:
+        print(f"Signal error for {asset}: {e}")
+        return None
+
+def place_trade(asset, direction, price, rsi):
+    global api, trade_count
+    
+    action = "call" if "CALL" in direction else "put"
+    
+    try:
+        success, order_id = api.buy(AMOUNT, asset, action, 60)
+        
+        if success:
+            trade_count += 1
+            message = f"""
+🎯 REAL TRADE #{trade_count}
+
+ASSET: {asset}
+DIRECTION: {direction}
+PRICE: {price}
+RSI: {rsi}
+AMOUNT: ${AMOUNT}
+EXPIRY: 1 minute
+
+✅ AUTO-TRADE EXECUTED
+TIME: {datetime.now().strftime("%H:%M:%S")}
+"""
+            send_telegram(message)
+            print(f"✅ Trade placed: {asset} {direction}")
+            return True
+        else:
+            print(f"❌ Trade failed: {order_id}")
+            return False
+            
+    except Exception as e:
+        print(f"Trade error: {e}")
+        return False
+
+def main():
+    global api
+    
+    send_telegram("🤖 REAL TRADING BOT STARTED\nUsing RSI indicator on OTC assets")
+    
+    # Connect to Pocket Option
+    print("Connecting to Pocket Option...")
+    api = PocketOption(SSID, IS_DEMO)
+    
+    if not api.connect():
+        send_telegram("❌ Failed to connect to Pocket Option")
+        print("Connection failed")
+        return
+    
+    balance = api.get_balance()
+    send_telegram(f"✅ Connected!\nDemo Balance: ${balance:.2f}")
+    print(f"Balance: ${balance:.2f}")
+    
+    print("Bot running. Scanning for signals...")
+    
+    while True:
+        try:
+            current_time = time.time()
+            
+            for asset in ASSETS:
+                # Check cooldown (2 minutes between trades on same asset)
+                if asset in last_trade_time:
+                    if current_time - last_trade_time[asset] < 120:
+                        continue
+                
+                # Get real signal
+                signal = get_signal(asset)
+                
+                if signal:
+                    print(f"{datetime.now().strftime('%H:%M:%S')} - {asset} RSI: {signal['rsi']} -> {signal['direction']}")
+                    
+                    # Place trade
+                    success = place_trade(asset, signal['direction'], signal['price'], signal['rsi'])
+                    
+                    if success:
+                        last_trade_time[asset] = current_time
+                    
+                    # Wait 5 seconds between trades
+                    time.sleep(5)
+            
+            time.sleep(CHECK_INTERVAL)
+            
+        except Exception as e:
+            print(f"Main loop error: {e}")
+            time.sleep(10)
+
+if __name__ == "__main__":
+    main()
