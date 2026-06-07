@@ -1,5 +1,3 @@
-from pocketoptionapi.stable_api import PocketOption
-import asyncio
 import requests
 import time
 import json
@@ -11,7 +9,11 @@ BOT_TOKEN = "8628176399:AAHC50NsptqAEXQ-sWZ9Yx8KCVzwmJL0lzg"
 CHAT_ID = "7120687986"
 
 # ===== POCKET OPTION CONFIGURATION =====
-IS_DEMO = True  # True for demo account, False for real
+# 🔻🔻🔻 REPLACE THIS WITH YOUR ACTUAL SSID 🔻🔻🔻
+SSID = '42["auth",{"session":"a%3A4%3A%7Bs%3A10%3A%22session_id%22%3Bs%3A32%3A%2233d40ea25c78bd300588c27d7a9a9e59%22%3Bs%3A10%3A%22ip_address%22%3Bs%3A14%3A%22141.95.102.117%22%3Bs%3A10%3A%22user_agent%22%3Bs%3A70%3A%22Mozilla%2F5.0%20%28X11%3B%20Linux%20x86_64%3B%20rv%3A151.0%29%20Gecko%2F20100101%20Firefox%2F151.0%22%3Bs%3A13%3A%22last_activity%22%3Bi%3A1780746618%3B%7Dcead7ca48d4a3b866944378eb3a8e05b","isDemo":1,"uid":"5c6a849a-1c1f-4b15-bfa7-ee3eb4052368","platform":2}]'
+# 🔺🔺🔺 REPLACE THIS WITH YOUR ACTUAL SSID 🔺🔺🔺
+
+IS_DEMO = True
 
 # ===== TRADING SETTINGS =====
 ASSETS = ["EURUSD_otc", "GBPUSD_otc", "USDJPY_otc", "AUDUSD_otc"]
@@ -19,15 +21,14 @@ AMOUNT = 1.0
 RSI_PERIOD = 14
 RSI_OVERBOUGHT = 70
 RSI_OVERSOLD = 30
+CHECK_INTERVAL = 60
 
 # ===== GLOBAL VARIABLES =====
-api = None
 last_trade_time = {}
 trade_count = 0
 price_history = {}
 
 def send_telegram(message):
-    """Send message to Telegram"""
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         payload = {"chat_id": CHAT_ID, "text": message}
@@ -37,7 +38,6 @@ def send_telegram(message):
         print(f"Telegram error: {e}")
 
 def calculate_rsi(prices):
-    """Calculate RSI from price list"""
     if len(prices) < RSI_PERIOD + 1:
         return 50
     
@@ -63,124 +63,134 @@ def calculate_rsi(prices):
     rsi = 100 - (100 / (1 + rs))
     return round(rsi, 2)
 
+def get_signal(asset, api):
+    global price_history
+    
+    try:
+        # Get real-time ticks
+        ticks = api.GetTicks(asset)
+        
+        if not ticks or len(ticks) < 30:
+            return None
+        
+        # Extract close prices
+        close_prices = []
+        for tick in ticks[-50:]:
+            if isinstance(tick, dict):
+                close_prices.append(float(tick['close']))
+            else:
+                close_prices.append(float(tick))
+        
+        if asset not in price_history:
+            price_history[asset] = []
+        
+        price_history[asset].extend(close_prices)
+        
+        # Keep last 100 prices
+        if len(price_history[asset]) > 100:
+            price_history[asset] = price_history[asset][-100:]
+        
+        if len(price_history[asset]) >= RSI_PERIOD + 1:
+            rsi = calculate_rsi(price_history[asset])
+            current_price = price_history[asset][-1]
+            
+            print(f"{asset} - RSI: {rsi}, Price: {current_price}")
+            
+            if rsi <= RSI_OVERSOLD:
+                return {"direction": "call", "display": "CALL 🟢", "rsi": rsi, "price": current_price}
+            elif rsi >= RSI_OVERBOUGHT:
+                return {"direction": "put", "display": "PUT 🔴", "rsi": rsi, "price": current_price}
+        
+        return None
+        
+    except Exception as e:
+        print(f"Signal error for {asset}: {e}")
+        return None
+
+def place_trade(api, asset, signal, price, rsi):
+    global trade_count
+    
+    try:
+        success, order_id = api.buy(AMOUNT, asset, signal['direction'], 60)
+        
+        if success:
+            trade_count += 1
+            message = f"""
+🎯 TRADE #{trade_count}
+
+ASSET: {asset}
+DIRECTION: {signal['display']}
+PRICE: {price}
+RSI: {rsi}
+AMOUNT: ${AMOUNT}
+EXPIRY: 1 minute
+
+✅ AUTO-TRADE EXECUTED
+TIME: {datetime.now().strftime('%H:%M:%S')}
+"""
+            send_telegram(message)
+            print(f"✅ Trade placed: {asset} {signal['display']}")
+            return True
+        else:
+            print(f"❌ Trade failed: {order_id}")
+            return False
+            
+    except Exception as e:
+        print(f"Trade error: {e}")
+        return False
+
 def main():
-    global api, trade_count, price_history
+    global last_trade_time
     
-    send_telegram("🤖 REAL TRADING BOT STARTED\nUsing RSI indicator on OTC assets")
+    send_telegram("🤖 POCKET OPTION AUTO-TRADE BOT STARTED")
     
-    # Connect to Pocket Option (auto-login via webview will open on first run)
     print("Connecting to Pocket Option...")
-    api = PocketOption("", IS_DEMO)  # Empty string triggers auto-login
+    api = PocketOption(SSID, IS_DEMO)
     
     if not api.connect():
         send_telegram("❌ Failed to connect to Pocket Option")
         print("Connection failed")
         return
     
-    # Get balance
-    try:
-        balance = api.get_balance()
-        if balance is None or balance == 0:
-            send_telegram("⚠️ Connected but balance is $0. Make sure you logged in correctly.")
-            print(f"Balance returned: {balance}")
-        else:
-            send_telegram(f"✅ Connected!\nDemo Balance: ${balance:.2f}")
-            print(f"Balance: ${balance:.2f}")
-    except Exception as e:
-        send_telegram(f"❌ Balance error: {e}")
-        print(f"Balance error: {e}")
+    balance = api.get_balance()
+    if balance:
+        send_telegram(f"✅ Connected!\nDemo Balance: ${balance:.2f}")
+        print(f"Balance: ${balance:.2f}")
+    else:
+        send_telegram("⚠️ Connected but balance is None")
+        print("Balance is None - SSID may be invalid")
         return
     
-    # Get all available pairs
-    pairs = api.GetPairs()
-    print(f"Available pairs: {len(pairs) if pairs else 0}")
-    
-    # Subscribe to selected assets
+    # Subscribe to assets
     for asset in ASSETS:
-        status = api.ChangeSymbol(asset, 60)
-        print(f"Subscribed to {asset}: {status}")
+        api.ChangeSymbol(asset, 60)
+        print(f"Subscribed to {asset}")
     
+    send_telegram(f"🔍 Scanning {len(ASSETS)} OTC assets for RSI signals...")
     print("Bot running. Scanning for signals...")
-    send_telegram("🔍 Scanning OTC assets for RSI signals...")
     
     while True:
         try:
             current_time = time.time()
             
             for asset in ASSETS:
-                # Check cooldown (2 minutes between trades on same asset)
+                # Cooldown: 2 minutes between trades on same asset
                 if asset in last_trade_time:
                     if current_time - last_trade_time[asset] < 120:
                         continue
                 
-                # Get ticks (real-time prices)
-                ticks = api.GetTicks(asset)
+                signal = get_signal(asset, api)
                 
-                if ticks and len(ticks) >= RSI_PERIOD + 1:
-                    # Store price history
-                    if asset not in price_history:
-                        price_history[asset] = []
+                if signal:
+                    success = place_trade(api, asset, signal, signal['price'], signal['rsi'])
                     
-                    # Add latest close price
-                    latest_price = float(ticks[-1]['close']) if isinstance(ticks[-1], dict) else float(ticks[-1])
-                    price_history[asset].append(latest_price)
+                    if success:
+                        last_trade_time[asset] = current_time
                     
-                    # Keep only last 50 candles
-                    if len(price_history[asset]) > 50:
-                        price_history[asset] = price_history[asset][-50:]
-                    
-                    # Calculate RSI
-                    if len(price_history[asset]) >= RSI_PERIOD + 1:
-                        rsi = calculate_rsi(price_history[asset])
-                        current_price = price_history[asset][-1]
-                        
-                        print(f"{asset} - RSI: {rsi}, Price: {current_price}")
-                        
-                        # Determine signal
-                        signal = None
-                        if rsi <= RSI_OVERSOLD:
-                            signal = "call"
-                            signal_display = "CALL 🟢"
-                        elif rsi >= RSI_OVERBOUGHT:
-                            signal = "put"
-                            signal_display = "PUT 🔴"
-                        
-                        if signal:
-                            trade_count += 1
-                            
-                            # Place trade
-                            success, order_id = api.Buy(AMOUNT, asset, signal, 60)
-                            
-                            if success:
-                                last_trade_time[asset] = current_time
-                                message = f"""
-🎯 REAL TRADE #{trade_count}
-
-ASSET: {asset}
-DIRECTION: {signal_display}
-PRICE: {current_price}
-RSI: {rsi}
-AMOUNT: ${AMOUNT}
-EXPIRY: 1 minute
-
-✅ AUTO-TRADE EXECUTED
-TIME: {datetime.now().strftime("%H:%M:%S")}
-"""
-                                send_telegram(message)
-                                print(f"✅ Trade placed: {asset} {signal_display}")
-                                
-                                # Check trade result after expiry
-                                time.sleep(65)
-                                profit, status = api.CheckWin(order_id)
-                                print(f"Trade result for {order_id}: Profit=${profit}, Status={status}")
-                            else:
-                                print(f"❌ Trade failed: {order_id}")
-                                send_telegram(f"❌ Trade failed on {asset}: {order_id}")
-                            
-                            # Wait 5 seconds between trades
-                            time.sleep(5)
+                    # Wait 5 seconds between trades
+                    time.sleep(5)
             
-            time.sleep(60)  # Main loop interval
+            time.sleep(CHECK_INTERVAL)
             
         except Exception as e:
             print(f"Main loop error: {e}")
