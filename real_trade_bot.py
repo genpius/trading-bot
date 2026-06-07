@@ -1,5 +1,4 @@
-from pocketoptionapi.stable_api
-import PocketOption
+from pocketoptionapi.stable_api import PocketOption
 import asyncio
 import requests
 import time
