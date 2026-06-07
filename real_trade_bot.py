@@ -73,8 +73,10 @@ def get_signal(asset):
     global api
     
     try:
-        # Get real candles from Pocket Option
-        candles = api.get_candles(asset=asset, interval=60, size=50)
+        # CORRECTED: Get real candles from Pocket Option
+        # The method is GetCandles, not get_candles
+        # Parameters: (active, period) not asset=
+        candles = api.GetCandles(asset, 60)
         
         if not candles or len(candles) < 30:
             print(f"Not enough candles for {asset}: {len(candles) if candles else 0}")
